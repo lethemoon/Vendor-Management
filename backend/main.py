@@ -14,7 +14,6 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.suppliers import router as suppliers_router
 from app.api.v1.surveys import router as surveys_router
 from app.api.v1.knowledge import router as knowledge_router
-from app.api.v1.feishu import router as feishu_router
 from app.database import Base, engine
 
 # 导入所有模型，确保它们被注册到Base.metadata
@@ -46,7 +45,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="供应商调研知识库管理系统 API",
-    description="供应商信息管理、调研问卷管理、知识库管理系统（飞书集成版）",
+    description="供应商信息管理、调研问卷管理、知识库管理系统",
     version="0.1.0",
     lifespan=lifespan
 )
@@ -66,7 +65,6 @@ app.include_router(auth_router)
 app.include_router(suppliers_router)
 app.include_router(surveys_router)
 app.include_router(knowledge_router)
-app.include_router(feishu_router)
 
 # 确保dist目录存在
 frontend_dist = "/workspace/frontend/dist"
