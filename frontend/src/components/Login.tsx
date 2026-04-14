@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authService, LoginCredentials } from '../services/auth';
-import { wechatService } from '../services/wechat';
 
 const Login = () => {
   const [formData, setFormData] = useState<LoginCredentials>({
@@ -10,37 +9,49 @@ const Login = () => {
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [wechatLoading, setWechatLoading] = useState(false);
+  const [feishuLoading, setFeishuLoading] = useState(false);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
     const code = searchParams.get('code');
     if (code) {
-      handleWeChatLogin(code);
+      handleFeishuLogin(code);
     }
   }, [searchParams]);
 
-  const handleWeChatLogin = async (code: string) => {
-    setWechatLoading(true);
+  const handleFeishuLogin = async (code: string) => {
+    setFeishuLoading(true);
     setError(null);
 
     try {
-      const response = await wechatService.login(code);
-      localStorage.setItem('token', response.access_token);
+      const response = await fetch('/api/v1/feishu/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: `code=${code}`
+      });
+      
+      if (!response.ok) {
+        throw new Error('飞书登录失败');
+      }
+      
+      const data = await response.json();
+      localStorage.setItem('token', data.access_token);
       navigate('/knowledge');
     } catch (err: any) {
-      setError(err.response?.data?.detail || '企业微信登录失败');
+      setError(err.message || '飞书登录失败');
     } finally {
-      setWechatLoading(false);
+      setFeishuLoading(false);
     }
   };
 
-  const handleWeChatAuth = () => {
-    const corpId = import.meta.env.VITE_WECHAT_CORP_ID || '';
+  const handleFeishuAuth = () => {
+    const appId = import.meta.env.VITE_FEISHU_APP_ID || '';
     const redirectUri = encodeURIComponent(window.location.origin + '/login');
-    const wechatAuthUrl = `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${corpId}&redirect_uri=${redirectUri}&response_type=code&scope=snsapi_base&state=STATE#wechat_redirect`;
-    window.location.href = wechatAuthUrl;
+    const feishuAuthUrl = `https://open.feishu.cn/open-apis/authen/v1/index?app_id=${appId}&redirect_uri=${redirectUri}&state=STATE`;
+    window.location.href = feishuAuthUrl;
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -67,12 +78,12 @@ const Login = () => {
     }
   };
 
-  if (wechatLoading) {
+  if (feishuLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">企业微信登录中...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">飞书登录中...</p>
         </div>
       </div>
     );
@@ -95,11 +106,11 @@ const Login = () => {
 
         <button
           type="button"
-          onClick={handleWeChatAuth}
+          onClick={handleFeishuAuth}
           className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
         >
           <span className="mr-2">📱</span>
-          企业微信登录
+          飞书登录
         </button>
 
         <div className="relative">

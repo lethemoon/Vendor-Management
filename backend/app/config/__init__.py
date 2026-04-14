@@ -26,17 +26,10 @@ class Settings(BaseSettings):
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
 
-    WECHAT_CORP_ID: str = ""
-    WECHAT_AGENT_ID: int = 0
-    WECHAT_SECRET: str = ""
-    WECHAT_TOKEN: str = ""
-    WECHAT_ENCODING_AES_KEY: str = ""
-    
-    WECHAT_MICRO_DISK_SECRET: str = ""
-    
-    TENCENT_HUNYUAN_APP_ID: str = ""
-    TENCENT_HUNYUAN_SECRET_KEY: str = ""
-    TENCENT_HUNYUAN_ENDPOINT: str = "https://hunyuan.tencentcloudapi.com"
+    FEISHU_APP_ID: str = ""
+    FEISHU_APP_SECRET: str = ""
+    FEISHU_VERIFICATION_TOKEN: str = ""
+    FEISHU_ENCRYPT_KEY: str = ""
 
     @property
     def DATABASE_URL(self) -> str:
