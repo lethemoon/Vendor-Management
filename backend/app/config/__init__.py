@@ -26,11 +26,6 @@ class Settings(BaseSettings):
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
 
-    FEISHU_APP_ID: str = ""
-    FEISHU_APP_SECRET: str = ""
-    FEISHU_VERIFICATION_TOKEN: str = ""
-    FEISHU_ENCRYPT_KEY: str = ""
-
     @property
     def DATABASE_URL(self) -> str:
         return "sqlite:///./test.db"
