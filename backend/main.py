@@ -14,10 +14,11 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.suppliers import router as suppliers_router
 from app.api.v1.surveys import router as surveys_router
 from app.api.v1.knowledge import router as knowledge_router
+from app.api.v1.wechat import router as wechat_router
 from app.database import Base, engine
 
 # 导入所有模型，确保它们被注册到Base.metadata
-from app.models import user, supplier, survey, knowledge
+from app.models import user, supplier, survey, knowledge, wechat
 
 settings = get_settings()
 
@@ -31,6 +32,12 @@ async def lifespan(app: FastAPI):
         from app.models.supplier import Supplier, SupplierDocument
         from app.models.survey import Survey, SurveyQuestion, SurveyResponse, SurveyAnswer
         from app.models.knowledge import KnowledgeBase, KnowledgeCategory, KnowledgeTag, KnowledgeAttachment
+        from app.models.wechat import (
+            TeamConfirmation,
+            ConfirmationStep,
+            WeChatUser,
+            WeChatMessage,
+        )
         
         # 创建所有表结构
         Base.metadata.create_all(bind=engine)
@@ -45,8 +52,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="供应商调研知识库管理系统 API",
-    description="供应商信息管理、调研问卷管理、知识库管理系统",
-    version="0.1.0",
+    description="供应商信息管理、调研问卷管理、知识库管理系统（企业微信集成版）",
+    version="0.2.0",
     lifespan=lifespan
 )
 
@@ -65,6 +72,7 @@ app.include_router(auth_router)
 app.include_router(suppliers_router)
 app.include_router(surveys_router)
 app.include_router(knowledge_router)
+app.include_router(wechat_router)
 
 # 确保dist目录存在
 frontend_dist = "/workspace/frontend/dist"
