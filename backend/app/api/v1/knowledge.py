@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
-from sqlalchemy.orm import Session
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from typing import List, Optional
 from datetime import datetime, timezone
 import os
@@ -11,8 +13,11 @@ from app.services.file_service import file_service
 logger = logging.getLogger(__name__)
 
 from app.database import get_db
-from app.models.knowledge import KnowledgeBase, KnowledgeStatus, KnowledgeType, KnowledgeCategory, KnowledgeTag, KnowledgeAttachment
-from app.models.user import User
+from app.models.knowledge import (
+    KnowledgeBase, KnowledgeStatus, KnowledgeType, KnowledgeCategory, 
+    KnowledgeTag, KnowledgeAttachment, Project, Phase, PermissionLevel
+)
+from app.models.user import User, UserRole
 from app.schemas.knowledge import (
     KnowledgeCategoryCreate,
     KnowledgeCategoryUpdate,
@@ -27,6 +32,17 @@ from app.schemas.knowledge import (
     KnowledgeBaseWithRelations,
     KnowledgeAttachmentCreate,
     KnowledgeAttachmentResponse,
+    ProjectCreate,
+    ProjectUpdate,
+    ProjectResponse,
+    ProjectWithPhases,
+    PhaseCreate,
+    PhaseUpdate,
+    PhaseResponse,
+    DirectoryNode,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
+    DocumentPreviewResponse,
 )
 from app.dependencies import get_current_active_user
 
@@ -594,3 +610,524 @@ async def upload_knowledge_attachment(
                 logger.info(f"Cleaned up temporary file: {temp_file_path}")
             except Exception as e:
                 logger.error(f"Error cleaning up temp file: {e}")
+
+
+# ==================== 项目管理 ====================
+
+@router.get("/projects", response_model=List[ProjectResponse])
+def list_projects(
+    skip: int = 0,
+    limit: int = 100,
+    is_active: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    query = db.query(Project)
+    if is_active is not None:
+        query = query.filter(Project.is_active == is_active)
+    projects = query.offset(skip).limit(limit).all()
+    return projects
+
+
+@router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+def create_project(
+    project_in: ProjectCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.RESEARCHER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to create projects"
+        )
+    
+    existing_project = db.query(Project).filter(Project.code == project_in.code).first()
+    if existing_project:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project with this code already exists"
+        )
+    
+    project = Project(**project_in.model_dump())
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.get("/projects/{project_id}", response_model=ProjectWithPhases)
+def get_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    return project
+
+
+@router.put("/projects/{project_id}", response_model=ProjectResponse)
+def update_project(
+    project_id: int,
+    project_in: ProjectUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.RESEARCHER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to update projects"
+        )
+    
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    if project_in.code and project_in.code != project.code:
+        existing_project = db.query(Project).filter(Project.code == project_in.code).first()
+        if existing_project:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Project with this code already exists"
+            )
+    
+    update_data = project_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(project, field, value)
+    
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete projects"
+        )
+    
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    db.delete(project)
+    db.commit()
+    return None
+
+
+# ==================== 阶段管理 ====================
+
+@router.get("/projects/{project_id}/phases", response_model=List[PhaseResponse])
+def list_phases(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    phases = db.query(Phase).filter(Phase.project_id == project_id).order_by(Phase.order).all()
+    return phases
+
+
+@router.post("/projects/{project_id}/phases", response_model=PhaseResponse, status_code=status.HTTP_201_CREATED)
+def create_phase(
+    project_id: int,
+    phase_in: PhaseCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.RESEARCHER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to create phases"
+        )
+    
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    phase = Phase(**phase_in.model_dump(), project_id=project_id)
+    db.add(phase)
+    db.commit()
+    db.refresh(phase)
+    return phase
+
+
+@router.put("/phases/{phase_id}", response_model=PhaseResponse)
+def update_phase(
+    phase_id: int,
+    phase_in: PhaseUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.RESEARCHER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to update phases"
+        )
+    
+    phase = db.query(Phase).filter(Phase.id == phase_id).first()
+    if not phase:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Phase not found"
+        )
+    
+    update_data = phase_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(phase, field, value)
+    
+    db.commit()
+    db.refresh(phase)
+    return phase
+
+
+@router.delete("/phases/{phase_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_phase(
+    phase_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete phases"
+        )
+    
+    phase = db.query(Phase).filter(Phase.id == phase_id).first()
+    if not phase:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Phase not found"
+        )
+    
+    db.delete(phase)
+    db.commit()
+    return None
+
+
+# ==================== 文档目录结构 ====================
+
+@router.get("/directory", response_model=List[DirectoryNode])
+def get_directory_structure(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """获取按项目/阶段/供应商组织的文档目录结构"""
+    root_nodes = []
+    
+    # 获取所有活跃项目
+    projects = db.query(Project).filter(Project.is_active == True).all()
+    
+    for project in projects:
+        project_node = DirectoryNode(
+            type="project",
+            id=project.id,
+            name=project.name,
+            code=project.code,
+            children=[],
+            knowledge_count=0
+        )
+        
+        # 获取项目的阶段
+        phases = db.query(Phase).filter(
+            Phase.project_id == project.id,
+            Phase.is_active == True
+        ).order_by(Phase.order).all()
+        
+        for phase in phases:
+            phase_node = DirectoryNode(
+                type="phase",
+                id=phase.id,
+                name=phase.name,
+                children=[],
+                knowledge_count=0
+            )
+            
+            # 获取该阶段的知识库文档（按供应商分组）
+            knowledges = db.query(KnowledgeBase).filter(
+                KnowledgeBase.project_id == project.id,
+                KnowledgeBase.phase_id == phase.id,
+                KnowledgeBase.is_active == True
+            ).options(joinedload(KnowledgeBase.supplier)).all()
+            
+            # 按供应商分组
+            supplier_groups = {}
+            for knowledge in knowledges:
+                # 检查权限
+                if not file_service.check_permission(current_user, knowledge, "view"):
+                    continue
+                
+                supplier_key = knowledge.supplier_id or "no_supplier"
+                if supplier_key not in supplier_groups:
+                    supplier_name = knowledge.supplier.name if knowledge.supplier else "未分类供应商"
+                    supplier_groups[supplier_key] = DirectoryNode(
+                        type="supplier",
+                        id=knowledge.supplier_id,
+                        name=supplier_name,
+                        children=[],
+                        knowledge_count=0
+                    )
+                
+                # 添加知识节点
+                knowledge_node = DirectoryNode(
+                    type="knowledge",
+                    id=knowledge.id,
+                    name=knowledge.title,
+                    children=[]
+                )
+                supplier_groups[supplier_key].children.append(knowledge_node)
+                supplier_groups[supplier_key].knowledge_count += 1
+                phase_node.knowledge_count += 1
+                project_node.knowledge_count += 1
+            
+            # 添加供应商组到阶段节点
+            phase_node.children.extend(supplier_groups.values())
+            project_node.children.append(phase_node)
+        
+        root_nodes.append(project_node)
+    
+    return root_nodes
+
+
+# ==================== 文档搜索 ====================
+
+@router.get("/search", response_model=KnowledgeSearchResponse)
+def search_knowledge(
+    query: str = Query(..., min_length=1, description="搜索关键词"),
+    tag_ids: Optional[List[int]] = Query(None, description="标签ID列表"),
+    project_id: Optional[int] = Query(None, description="项目ID"),
+    phase_id: Optional[int] = Query(None, description="阶段ID"),
+    supplier_id: Optional[int] = Query(None, description="供应商ID"),
+    type: Optional[KnowledgeType] = Query(None, description="文档类型"),
+    status: Optional[KnowledgeStatus] = Query(None, description="文档状态"),
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """搜索知识库文档（按文件名、标签）"""
+    search_term = f"%{query}%"
+    
+    # 构建查询
+    base_query = db.query(KnowledgeBase).filter(
+        or_(
+            KnowledgeBase.title.ilike(search_term),
+            KnowledgeBase.content.ilike(search_term),
+            KnowledgeBase.summary.ilike(search_term)
+        )
+    )
+    
+    # 添加过滤条件
+    if project_id:
+        base_query = base_query.filter(KnowledgeBase.project_id == project_id)
+    if phase_id:
+        base_query = base_query.filter(KnowledgeBase.phase_id == phase_id)
+    if supplier_id:
+        base_query = base_query.filter(KnowledgeBase.supplier_id == supplier_id)
+    if type:
+        base_query = base_query.filter(KnowledgeBase.type == type)
+    if status:
+        base_query = base_query.filter(KnowledgeBase.status == status)
+    
+    # 获取结果并检查权限
+    all_knowledges = base_query.options(
+        joinedload(KnowledgeBase.category),
+        joinedload(KnowledgeBase.project),
+        joinedload(KnowledgeBase.phase),
+        joinedload(KnowledgeBase.tags),
+        joinedload(KnowledgeBase.attachments)
+    ).all()
+    
+    # 过滤有权限的文档
+    filtered_knowledges = [
+        k for k in all_knowledges 
+        if file_service.check_permission(current_user, k, "view")
+    ]
+    
+    # 如果有标签过滤，再进行标签过滤
+    if tag_ids:
+        filtered_knowledges = [
+            k for k in filtered_knowledges 
+            if any(tag.id in tag_ids for tag in k.tags)
+        ]
+    
+    # 分页
+    total = len(filtered_knowledges)
+    results = filtered_knowledges[skip:skip + limit]
+    
+    return KnowledgeSearchResponse(
+        total=total,
+        results=results
+    )
+
+
+# ==================== 文档预览 ====================
+
+@router.get("/attachments/{attachment_id}/preview", response_model=DocumentPreviewResponse)
+def preview_document(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """获取文档预览信息"""
+    attachment = db.query(KnowledgeAttachment).filter(
+        KnowledgeAttachment.id == attachment_id
+    ).first()
+    
+    if not attachment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found"
+        )
+    
+    # 检查知识库文档权限
+    knowledge = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == attachment.knowledge_id
+    ).first()
+    
+    if not knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Knowledge not found"
+        )
+    
+    if not file_service.check_permission(current_user, knowledge, "view"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this document"
+        )
+    
+    # 从文件路径中提取对象名
+    object_name = None
+    if attachment.file_path.startswith("http"):
+        # 从 MinIO URL 中提取对象名
+        parts = attachment.file_path.split("/")
+        if len(parts) >= 4:
+            object_name = "/".join(parts[4:])
+    elif attachment.file_path.startswith("file://"):
+        # 从本地文件路径中提取对象名
+        local_path = attachment.file_path[7:]  # 移除 file://
+        if file_service.local_storage_dir in local_path:
+            object_name = local_path[len(file_service.local_storage_dir) + 1:]
+    
+    if not object_name:
+        # 尝试从 file_path 中解析
+        object_name = attachment.file_path.split("/")[-1]
+    
+    # 获取预览 URL
+    preview_url = file_service.get_file_url_for_preview(object_name)
+    
+    # 判断是否可以预览
+    can_preview = False
+    preview_content = None
+    
+    # 文本和常见文档类型可以预览
+    previewable_types = [
+        "text/plain", "text/markdown", "application/pdf", 
+        "image/png", "image/jpeg", "image/gif"
+    ]
+    
+    if attachment.mime_type in previewable_types:
+        can_preview = True
+    
+    # 对于文本文件，直接读取内容
+    if attachment.mime_type in ["text/plain", "text/markdown"]:
+        content = file_service.get_file_content(object_name)
+        if content:
+            try:
+                preview_content = content.decode("utf-8")
+            except:
+                preview_content = None
+    
+    return DocumentPreviewResponse(
+        file_name=attachment.name,
+        mime_type=attachment.mime_type or "application/octet-stream",
+        file_size=attachment.file_size or 0,
+        preview_url=preview_url,
+        content=preview_content,
+        can_preview=can_preview
+    )
+
+
+@router.get("/attachments/{attachment_id}/download")
+def download_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """下载附件"""
+    attachment = db.query(KnowledgeAttachment).filter(
+        KnowledgeAttachment.id == attachment_id
+    ).first()
+    
+    if not attachment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found"
+        )
+    
+    # 检查知识库文档权限
+    knowledge = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == attachment.knowledge_id
+    ).first()
+    
+    if not knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Knowledge not found"
+        )
+    
+    if not file_service.check_permission(current_user, knowledge, "view"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to download this document"
+        )
+    
+    # 从文件路径中提取对象名
+    object_name = None
+    if attachment.file_path.startswith("http"):
+        parts = attachment.file_path.split("/")
+        if len(parts) >= 4:
+            object_name = "/".join(parts[4:])
+    elif attachment.file_path.startswith("file://"):
+        local_path = attachment.file_path[7:]
+        if file_service.local_storage_dir in local_path:
+            object_name = local_path[len(file_service.local_storage_dir) + 1:]
+    
+    if not object_name:
+        object_name = attachment.file_path.split("/")[-1]
+    
+    # 获取文件内容
+    content = file_service.get_file_content(object_name)
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File content not found"
+        )
+    
+    # 返回文件流
+    return StreamingResponse(
+        iter([content]),
+        media_type=attachment.mime_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename={attachment.name}"
+        }
+    )

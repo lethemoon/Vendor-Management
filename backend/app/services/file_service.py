@@ -3,12 +3,15 @@
 """
 from minio import Minio
 from minio.error import S3Error
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict, Any
 from app.config import get_settings
+from app.models.user import User, UserRole
+from app.models.knowledge import KnowledgeBase, KnowledgeAttachment, PermissionLevel
 import os
 import uuid
 import shutil
 import logging
+import mimetypes
 
 # 日志配置
 logger = logging.getLogger(__name__)
@@ -184,8 +187,6 @@ class FileService:
             local_file_path = os.path.join(self.local_storage_dir, object_name)
             if os.path.exists(local_file_path):
                 file_size = os.path.getsize(local_file_path)
-                # 简单的 MIME 类型检测
-                import mimetypes
                 mime_type, _ = mimetypes.guess_type(local_file_path)
                 mime_type = mime_type or "application/octet-stream"
                 logger.info(f"File info retrieved from local storage: {object_name}, size: {file_size}, content-type: {mime_type}")
@@ -195,6 +196,140 @@ class FileService:
         except Exception as e:
             logger.error(f"Error getting file info from local storage: {e}")
             return None
+    
+    def get_file_content(self, object_name: str) -> Optional[bytes]:
+        """获取文件内容用于预览"""
+        logger.info(f"Getting file content for preview: {object_name}")
+        
+        if self.use_minio and self.minio_client:
+            try:
+                response = self.minio_client.get_object(
+                    self.bucket_name,
+                    object_name
+                )
+                content = response.read()
+                response.close()
+                response.release_conn()
+                logger.info(f"File content retrieved from MinIO: {object_name}")
+                return content
+            except Exception as e:
+                logger.error(f"Error getting file content from MinIO: {e}")
+                self.use_minio = False
+                logger.info("Falling back to local storage for file preview")
+        
+        try:
+            local_file_path = os.path.join(self.local_storage_dir, object_name)
+            if os.path.exists(local_file_path):
+                with open(local_file_path, 'rb') as f:
+                    content = f.read()
+                logger.info(f"File content retrieved from local storage: {object_name}")
+                return content
+            logger.warning(f"File not found in local storage for preview: {object_name}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting file content from local storage: {e}")
+            return None
+    
+    def check_permission(self, user: User, knowledge: KnowledgeBase, required_permission: str = "view") -> bool:
+        """
+        检查用户是否有权限访问文档
+        
+        Args:
+            user: 当前用户
+            knowledge: 知识库文档
+            required_permission: 需要的权限 (view, edit, delete)
+        
+        Returns:
+            是否有权限
+        """
+        # 管理员拥有所有权限
+        if user.role == UserRole.ADMIN:
+            return True
+        
+        # 检查权限级别
+        if knowledge.permission_level == PermissionLevel.PUBLIC:
+            # 公开文档，所有用户都可以查看
+            if required_permission == "view":
+                return True
+        elif knowledge.permission_level == PermissionLevel.INTERNAL:
+            # 内部文档，所有登录用户都可以查看
+            if required_permission == "view":
+                return True
+        elif knowledge.permission_level == PermissionLevel.RESTRICTED:
+            # 受限文档，只有作者或管理员可以查看
+            if knowledge.author_id == user.id:
+                return True
+            if required_permission == "view":
+                # 调研员和审核员也可以查看受限文档
+                if user.role in [UserRole.RESEARCHER, UserRole.REVIEWER]:
+                    return True
+            return False
+        
+        # 编辑和删除权限检查
+        if required_permission in ["edit", "delete"]:
+            # 只有作者、调研员（自己创建的）或管理员可以编辑/删除
+            if knowledge.author_id == user.id:
+                return True
+            if user.role == UserRole.RESEARCHER and knowledge.author_id == user.id:
+                return True
+            return False
+        
+        return True
+    
+    def get_file_url_for_preview(self, object_name: str) -> Optional[str]:
+        """获取文件预览URL"""
+        logger.info(f"Getting preview URL for: {object_name}")
+        
+        if self.use_minio and self.minio_client:
+            try:
+                # 生成临时预签名URL，有效期1小时
+                url = self.minio_client.presigned_get_object(
+                    self.bucket_name,
+                    object_name,
+                    expires=3600
+                )
+                logger.info(f"Generated presigned URL for preview: {object_name}")
+                return url
+            except Exception as e:
+                logger.error(f"Error generating presigned URL: {e}")
+        
+        # 本地存储模式下，返回文件路径
+        local_file_path = os.path.join(self.local_storage_dir, object_name)
+        if os.path.exists(local_file_path):
+            return f"file://{local_file_path}"
+        return None
+    
+    def organize_path(self, project_id: Optional[int] = None, 
+                     phase_id: Optional[int] = None, 
+                     supplier_id: Optional[int] = None, 
+                     filename: str = "") -> str:
+        """
+        生成组织化的文件路径
+        
+        Args:
+            project_id: 项目ID
+            phase_id: 阶段ID
+            supplier_id: 供应商ID
+            filename: 文件名
+        
+        Returns:
+            组织化的文件路径
+        """
+        path_parts = ["knowledge"]
+        
+        if project_id:
+            path_parts.append(f"project_{project_id}")
+        
+        if phase_id:
+            path_parts.append(f"phase_{phase_id}")
+        
+        if supplier_id:
+            path_parts.append(f"supplier_{supplier_id}")
+        
+        # 添加文件名
+        path_parts.append(filename)
+        
+        return "/".join(path_parts)
 
 # 创建文件服务实例
 file_service = FileService()

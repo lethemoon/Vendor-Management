@@ -20,6 +20,12 @@ class KnowledgeType(str, enum.Enum):
     GUIDELINE = "guideline"
 
 
+class PermissionLevel(str, enum.Enum):
+    PUBLIC = "public"
+    INTERNAL = "internal"
+    RESTRICTED = "restricted"
+
+
 # 多对多关系表
 knowledge_tag_association = Table(
     'knowledge_tag_association',
@@ -28,6 +34,39 @@ knowledge_tag_association = Table(
     Column('tag_id', Integer, ForeignKey('knowledge_tags.id'), primary_key=True),
     extend_existing=True
 )
+
+
+# 项目表
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    code = Column(String(100), unique=True, nullable=False)
+    description = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    phases = relationship("Phase", back_populates="project", cascade="all, delete-orphan")
+    knowledge_bases = relationship("KnowledgeBase", back_populates="project")
+
+
+# 阶段表
+class Phase(Base):
+    __tablename__ = "phases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    name = Column(String(255), nullable=False)
+    order = Column(Integer, default=0)
+    description = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    project = relationship("Project", back_populates="phases")
+    knowledge_bases = relationship("KnowledgeBase", back_populates="phase")
 
 
 class KnowledgeCategory(Base):
@@ -70,7 +109,10 @@ class KnowledgeBase(Base):
     summary = Column(Text)
     type = Column(Enum(KnowledgeType), default=KnowledgeType.ARTICLE, nullable=False)
     status = Column(Enum(KnowledgeStatus), default=KnowledgeStatus.DRAFT, nullable=False)
+    permission_level = Column(Enum(PermissionLevel), default=PermissionLevel.INTERNAL, nullable=False)
     category_id = Column(Integer, ForeignKey('knowledge_categories.id'))
+    project_id = Column(Integer, ForeignKey('projects.id'))
+    phase_id = Column(Integer, ForeignKey('phases.id'))
     supplier_id = Column(Integer, ForeignKey('suppliers.id'))
     survey_id = Column(Integer, ForeignKey('surveys.id'))
     author_id = Column(Integer, ForeignKey('users.id'))
@@ -83,6 +125,8 @@ class KnowledgeBase(Base):
     published_at = Column(DateTime(timezone=True))
 
     category = relationship("KnowledgeCategory", back_populates="knowledge_bases")
+    project = relationship("Project", back_populates="knowledge_bases")
+    phase = relationship("Phase", back_populates="knowledge_bases")
     supplier = relationship("Supplier")
     survey = relationship("Survey")
     author = relationship("User")

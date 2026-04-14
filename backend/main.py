@@ -14,10 +14,14 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.suppliers import router as suppliers_router
 from app.api.v1.surveys import router as surveys_router
 from app.api.v1.knowledge import router as knowledge_router
+from app.api.v1.notifications import router as notifications_router
+from app.api.v1.confirmation import router as confirmation_router
+from app.api.v1.rag import router as rag_router
+from app.api.v1.approval import router as approval_router
 from app.database import Base, engine
 
 # 导入所有模型，确保它们被注册到Base.metadata
-from app.models import user, supplier, survey, knowledge
+from app.models import user, supplier, survey, knowledge, notification, confirmation, vector, approval
 
 settings = get_settings()
 
@@ -31,6 +35,10 @@ async def lifespan(app: FastAPI):
         from app.models.supplier import Supplier, SupplierDocument
         from app.models.survey import Survey, SurveyQuestion, SurveyResponse, SurveyAnswer
         from app.models.knowledge import KnowledgeBase, KnowledgeCategory, KnowledgeTag, KnowledgeAttachment
+        from app.models.confirmation import Confirmation, ConfirmationRecord
+        from app.models.notification import Notification, NotificationRead
+        from app.models.vector import DocumentChunk
+        from app.models.approval import Approval, ApprovalStep, ApprovalFlowTemplate
         
         # 创建所有表结构
         Base.metadata.create_all(bind=engine)
@@ -65,6 +73,10 @@ app.include_router(auth_router)
 app.include_router(suppliers_router)
 app.include_router(surveys_router)
 app.include_router(knowledge_router)
+app.include_router(notifications_router)
+app.include_router(confirmation_router)
+app.include_router(rag_router)
+app.include_router(approval_router)
 
 # 确保dist目录存在
 frontend_dist = "/workspace/frontend/dist"
@@ -75,9 +87,11 @@ if os.path.exists(frontend_dist):
     # 挂载静态文件
     app.mount("/assets", StaticFiles(directory=f"{frontend_dist}/assets"), name="assets")
     
-    # 处理所有其他路由，返回index.html以支持客户端路由
+    # 处理所有其他路由，返回index.html以支持客户端路由（排除API路由）
     @app.get("/{path:path}")
     async def serve_spa(path: str):
+        if path.startswith("api/") or path.startswith("health"):
+            return FileResponse(f"{frontend_dist}/index.html", status_code=404)
         return FileResponse(f"{frontend_dist}/index.html")
 
 
