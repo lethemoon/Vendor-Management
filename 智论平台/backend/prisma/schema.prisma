@@ -1,0 +1,142 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户表
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  phone         String?   @unique
+  password      String
+  name          String
+  avatar        String?
+  role          UserRole  @default(Student)
+  status        UserStatus @default(Active)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  papers        Paper[]
+  documents     Document[]
+  subscriptions Subscription[]
+  usageLogs     UsageLog[]
+  
+  @@map("users")
+}
+
+enum UserRole {
+  Student
+  Graduate
+  Scholar
+}
+
+enum UserStatus {
+  Active
+  Inactive
+  Banned
+}
+
+// 论文表
+model Paper {
+  id            String      @id @default(uuid())
+  userId        String
+  title         String
+  content       String      @db.Text
+  originalText  String?     @db.Text
+  processedText String?     @db.Text
+  status        PaperStatus @default(Draft)
+  plagiarismRate Float?
+  aigcRate      Float?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("papers")
+}
+
+enum PaperStatus {
+  Draft
+  Processing
+  Completed
+  Failed
+}
+
+// 文献表
+model Document {
+  id            String   @id @default(uuid())
+  userId        String
+  title         String
+  authors       String
+  journal       String?
+  year          Int?
+  volume        String?
+  issue         String?
+  pages         String?
+  doi           String?
+  url           String?
+  abstract      String?  @db.Text
+  keywords      String[]
+  content       String?  @db.Text
+  filePath      String?
+  embedding     Float[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("documents")
+}
+
+// 订阅表
+model Subscription {
+  id            String          @id @default(uuid())
+  userId        String
+  plan          SubscriptionPlan
+  status        SubscriptionStatus @default(Active)
+  startDate     DateTime
+  endDate       DateTime
+  wordQuota     Int
+  wordsUsed     Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("subscriptions")
+}
+
+enum SubscriptionPlan {
+  Basic
+  Professional
+  Team
+}
+
+enum SubscriptionStatus {
+  Active
+  Expired
+  Cancelled
+}
+
+// 使用日志表
+model UsageLog {
+  id            String      @id @default(uuid())
+  userId        String
+  action        String
+  resource      String
+  wordsUsed     Int         @default(0)
+  cost          Float       @default(0)
+  metadata      Json?
+  createdAt     DateTime    @default(now())
+  
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("usage_logs")
+}
