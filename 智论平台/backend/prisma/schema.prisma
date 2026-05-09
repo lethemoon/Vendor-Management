@@ -27,6 +27,7 @@ model User {
   documents     Document[]
   subscriptions Subscription[]
   usageLogs     UsageLog[]
+  aigcDetections AIGCDetection[]
   
   @@map("users")
 }
@@ -135,8 +136,88 @@ model UsageLog {
   cost          Float       @default(0)
   metadata      Json?
   createdAt     DateTime    @default(now())
-  
+
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@map("usage_logs")
+}
+
+// AIGC检测记录表
+model AIGCDetection {
+  id                String                @id @default(uuid())
+  userId            String
+  title             String
+  content           String?               @db.Text
+  encryptedContent  String?               @db.Text
+  contentHash       String?
+  source            String?               @default("manual")
+  overallScore      Float
+  riskLevel         AIGCRiskLevel        @default(Medium)
+  paragraphCount    Int
+  highRiskCount     Int                  @default(0)
+  status            AIGCDetectionStatus  @default(Pending)
+  result            Json?
+  optimizationRounds Int?                @default(0)
+  processingTimeMs  Int?
+  creditsConsumed   Float?               @default(0)
+  paperId           String?
+  deletedAt         DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  optimizations     OptimizationRecord[]
+
+  @@map("aigc_detections")
+}
+
+enum AIGCRiskLevel {
+  Low
+  Medium
+  MediumHigh
+  High
+}
+
+enum AIGCDetectionStatus {
+  Pending
+  Processing
+  Analyzing
+  Completed
+  Analyzed
+  Failed
+}
+
+// AIGC优化记录表（降痕操作）
+model OptimizationRecord {
+  id                    String                @id @default(uuid())
+  detectionId           String
+  roundNumber           Int?
+  operationType         String?
+  paragraphIndex        Int?
+  originalScore         Float?
+  rewrittenScore        Float?
+  beforeAigcRate        Float?
+  afterAigcRate         Float?
+  rateChange            Float?
+  versionType           RewriteVersionTypeEnum @default(Balanced)
+  adopted               Boolean               @default(false)
+  targetParagraphIndices Int[]
+  selectedVersion      Int?
+  beforeTextHash        String?
+  detail                Json?
+  diffData              Json?
+  processingTimeMs      Int?
+  costCredits           Float?
+  deletedAt             DateTime?
+  createdAt             DateTime              @default(now())
+
+  detection             AIGCDetection         @relation(fields: [detectionId], references: [id], onDelete: Cascade)
+
+  @@map("optimization_records")
+}
+
+enum RewriteVersionTypeEnum {
+  Conservative
+  Balanced
+  Aggressive
 }
