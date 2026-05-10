@@ -19,7 +19,13 @@ const fastify = Fastify({
 
 const prisma = new PrismaClient()
 
-const redis = new Redis(process.env.REDIS_URL!)
+const redis = new Redis(process.env.REDIS_URL!, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+})
+redis.on('error', (err) => {
+  fastify.log.warn({ err }, 'Redis unavailable - running in degraded mode')
+})
 
 async function main() {
   await fastify.register(helmet)
