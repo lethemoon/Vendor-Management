@@ -13,6 +13,12 @@ import {
   LIBRARY_ERROR_MESSAGES,
 } from '../types/library';
 import { libraryService } from '../services/libraryService';
+import {
+  chartSchemas,
+  ChartErrorCode,
+  CHART_ERROR_MESSAGES,
+} from '../types/chart';
+import { chartService } from '../services/chartService';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -677,6 +683,213 @@ export default async function libraryRoutes(fastify: FastifyInstance) {
         error: {
           code: LibraryErrorCode.CITATION_GENERATION_FAILED,
           message: '导出引用失败，请稍后重试',
+        },
+      });
+    }
+  });
+
+  // ==================== 端点10: GET /api/v1/library/stats/overview ====================
+
+  fastify.get('/stats/overview', {
+    preHandler: [fastify.authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.NOT_AUTHORIZED,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.NOT_AUTHORIZED],
+          },
+        });
+      }
+
+      chartSchemas.overviewQuery.parse(request.query);
+
+      const data = await chartService.getUserActivityStats(userId);
+
+      return reply.send({
+        success: true,
+        data,
+        message: '获取统计概览成功',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.INVALID_PARAMETERS,
+            message: '参数校验失败',
+            details: error.errors,
+          },
+        });
+      }
+
+      fastify.log.error(error, '获取统计概览失败');
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: ChartErrorCode.AGGREGATION_FAILED,
+          message: '获取统计概览失败，请稍后重试',
+        },
+      });
+    }
+  });
+
+  // ==================== 端点11: GET /api/v1/library/stats/type-distribution ====================
+
+  fastify.get('/stats/type-distribution', {
+    preHandler: [fastify.authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.NOT_AUTHORIZED,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.NOT_AUTHORIZED],
+          },
+        });
+      }
+
+      chartSchemas.typeDistributionQuery.parse(request.query);
+
+      const data = await chartService.getLibraryTypeStats(userId);
+
+      return reply.send({
+        success: true,
+        data,
+        message: '获取类型分布数据成功',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.INVALID_PARAMETERS,
+            message: '参数校验失败',
+            details: error.errors,
+          },
+        });
+      }
+
+      fastify.log.error(error, '获取类型分布数据失败');
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: ChartErrorCode.AGGREGATION_FAILED,
+          message: '获取类型分布数据失败，请稍后重试',
+        },
+      });
+    }
+  });
+
+  // ==================== 端点12: GET /api/v1/library/stats/citation-trend ====================
+
+  fastify.get('/stats/citation-trend', {
+    preHandler: [fastify.authenticate],
+  }, async (
+    request: FastifyRequest<{ Querystring: { months?: string; period?: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.NOT_AUTHORIZED,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.NOT_AUTHORIZED],
+          },
+        });
+      }
+
+      const query = chartSchemas.citationTrendQuery.parse({
+        months: request.query.months,
+        period: request.query.period,
+      });
+
+      const data = await chartService.getLibraryCitationTrend(userId, query.months);
+
+      return reply.send({
+        success: true,
+        data,
+        message: '获取引用趋势数据成功',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.INVALID_PARAMETERS,
+            message: '参数校验失败',
+            details: error.errors,
+          },
+        });
+      }
+
+      fastify.log.error(error, '获取引用趋势数据失败');
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: ChartErrorCode.AGGREGATION_FAILED,
+          message: '获取引用趋势数据失败，请稍后重试',
+        },
+      });
+    }
+  });
+
+  // ==================== 端点13: GET /api/v1/library/stats/monthly-growth ====================
+
+  fastify.get('/stats/monthly-growth', {
+    preHandler: [fastify.authenticate],
+  }, async (
+    request: FastifyRequest<{ Querystring: { months?: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.NOT_AUTHORIZED,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.NOT_AUTHORIZED],
+          },
+        });
+      }
+
+      const query = chartSchemas.monthlyGrowthQuery.parse({
+        months: request.query.months,
+      });
+
+      const data = await chartService.getLibraryMonthlyGrowth(userId, query.months);
+
+      return reply.send({
+        success: true,
+        data,
+        message: '获取月度增长数据成功',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.INVALID_PARAMETERS,
+            message: '参数校验失败',
+            details: error.errors,
+          },
+        });
+      }
+
+      fastify.log.error(error, '获取月度增长数据失败');
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: ChartErrorCode.AGGREGATION_FAILED,
+          message: '获取月度增长数据失败，请稍后重试',
         },
       });
     }

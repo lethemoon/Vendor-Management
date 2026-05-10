@@ -20,6 +20,12 @@ import {
   RewriteVersionOutput,
 } from '../types/aigc';
 import {
+  chartSchemas,
+  ChartErrorCode,
+  CHART_ERROR_MESSAGES,
+} from '../types/chart';
+import { chartService } from '../services/chartService';
+import {
   runRuleEngine,
   splitSentences,
 } from '../services/ruleEngine';
@@ -1290,6 +1296,302 @@ export default async function aigcRoutes(fastify: FastifyInstance) {
         error: {
           code: AIGCErrorCode.DETECTION_NOT_FOUND,
           message: '删除记录失败，请稍后重试',
+        },
+      });
+    }
+  });
+
+  // ==================== 端点8: GET /api/v1/aigc/:id/chart/risk-distribution ====================
+
+  fastify.get('/:id/chart/risk-distribution', {
+    preHandler: [fastify.authenticate],
+  }, async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.NOT_AUTHORIZED,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.NOT_AUTHORIZED],
+          },
+        });
+      }
+
+      const { id: aigcId } = request.params;
+      chartSchemas.riskDistributionQuery.parse({ id: aigcId });
+
+      const detection = await prisma.aIGCDetection.findFirst({
+        where: { id: aigcId, userId, deletedAt: null },
+      });
+
+      if (!detection) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.DETECTION_NOT_FOUND,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.DETECTION_NOT_FOUND],
+          },
+        });
+      }
+
+      const data = await chartService.getAIGCRiskDistribution(aigcId);
+
+      return reply.send({
+        success: true,
+        data,
+        message: '获取风险分布数据成功',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.INVALID_PARAMETERS,
+            message: '参数校验失败',
+            details: error.errors,
+          },
+        });
+      }
+
+      fastify.log.error(error, '获取风险分布数据失败');
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: ChartErrorCode.AGGREGATION_FAILED,
+          message: '获取风险分布数据失败，请稍后重试',
+        },
+      });
+    }
+  });
+
+  // ==================== 端点9: GET /api/v1/aigc/:id/chart/segments-timeline ====================
+
+  fastify.get('/:id/chart/segments-timeline', {
+    preHandler: [fastify.authenticate],
+  }, async (
+    request: FastifyRequest<{ Params: { id: string }; Querystring: { sortBy?: string; filterBy?: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.NOT_AUTHORIZED,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.NOT_AUTHORIZED],
+          },
+        });
+      }
+
+      const { id: aigcId } = request.params;
+      const query = chartSchemas.segmentsTimelineQuery.parse({
+        id: aigcId,
+        sortBy: request.query.sortBy,
+        filterBy: request.query.filterBy,
+      });
+
+      const detection = await prisma.aIGCDetection.findFirst({
+        where: { id: aigcId, userId, deletedAt: null },
+      });
+
+      if (!detection) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.DETECTION_NOT_FOUND,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.DETECTION_NOT_FOUND],
+          },
+        });
+      }
+
+      const data = await chartService.getAIGCSegmentsTimeline(
+        aigcId,
+        query.sortBy,
+        query.filterBy
+      );
+
+      return reply.send({
+        success: true,
+        data,
+        message: '获取段落时间线数据成功',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.INVALID_PARAMETERS,
+            message: '参数校验失败',
+            details: error.errors,
+          },
+        });
+      }
+
+      fastify.log.error(error, '获取段落时间线数据失败');
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: ChartErrorCode.AGGREGATION_FAILED,
+          message: '获取段落时间线数据失败，请稍后重试',
+        },
+      });
+    }
+  });
+
+  // ==================== 端点10: GET /api/v1/aigc/:id/chart/risk-gauge ====================
+
+  fastify.get('/:id/chart/risk-gauge', {
+    preHandler: [fastify.authenticate],
+  }, async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.NOT_AUTHORIZED,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.NOT_AUTHORIZED],
+          },
+        });
+      }
+
+      const { id: aigcId } = request.params;
+      chartSchemas.riskGaugeQuery.parse({ id: aigcId });
+
+      const detection = await prisma.aIGCDetection.findFirst({
+        where: { id: aigcId, userId, deletedAt: null },
+      });
+
+      if (!detection) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.DETECTION_NOT_FOUND,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.DETECTION_NOT_FOUND],
+          },
+        });
+      }
+
+      const data = await chartService.getAIGCRiskGauge(aigcId);
+
+      return reply.send({
+        success: true,
+        data,
+        message: '获取风险仪表盘数据成功',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.INVALID_PARAMETERS,
+            message: '参数校验失败',
+            details: error.errors,
+          },
+        });
+      }
+
+      fastify.log.error(error, '获取风险仪表盘数据失败');
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: ChartErrorCode.AGGREGATION_FAILED,
+          message: '获取风险仪表盘数据失败，请稍后重试',
+        },
+      });
+    }
+  });
+
+  // ==================== 端点11: GET /api/v1/aigc/:id/chart/detail-table ====================
+
+  fastify.get('/:id/chart/detail-table', {
+    preHandler: [fastify.authenticate],
+  }, async (
+    request: FastifyRequest<{
+      Params: { id: string };
+      Querystring: { page?: string; pageSize?: string; sortBy?: string; filterBy?: string };
+    }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.NOT_AUTHORIZED,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.NOT_AUTHORIZED],
+          },
+        });
+      }
+
+      const { id: aigcId } = request.params;
+      const query = chartSchemas.detailTableQuery.parse({
+        id: aigcId,
+        page: request.query.page,
+        pageSize: request.query.pageSize,
+        sortBy: request.query.sortBy,
+        filterBy: request.query.filterBy,
+      });
+
+      const detection = await prisma.aIGCDetection.findFirst({
+        where: { id: aigcId, userId, deletedAt: null },
+      });
+
+      if (!detection) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.DETECTION_NOT_FOUND,
+            message: CHART_ERROR_MESSAGES[ChartErrorCode.DETECTION_NOT_FOUND],
+          },
+        });
+      }
+
+      const data = await chartService.getAIGCDetailTable(
+        aigcId,
+        query.page,
+        query.pageSize,
+        query.sortBy,
+        query.filterBy
+      );
+
+      return reply.send({
+        success: true,
+        data,
+        meta: {
+          currentPage: query.page,
+          pageSize: query.pageSize,
+          totalItems: data.totalItems,
+        },
+        message: '获取详细数据表成功',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: {
+            code: ChartErrorCode.INVALID_PARAMETERS,
+            message: '参数校验失败',
+            details: error.errors,
+          },
+        });
+      }
+
+      fastify.log.error(error, '获取详细数据表失败');
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: ChartErrorCode.AGGREGATION_FAILED,
+          message: '获取详细数据表失败，请稍后重试',
         },
       });
     }

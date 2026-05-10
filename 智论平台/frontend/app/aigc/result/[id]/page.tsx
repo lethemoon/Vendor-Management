@@ -7,6 +7,7 @@ import { aigcApi, type DetectResponse, type RewriteVersion, type OptimizationRec
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import ScoreCircle from '@/components/aigc/ScoreCircle';
 import ParagraphHeatmap from '@/components/aigc/ParagraphHeatmap';
@@ -15,6 +16,11 @@ import ParagraphSelector from '@/components/aigc/ParagraphSelector';
 import AIGCDiffViewer from '@/components/aigc/AIGCDiffViewer';
 import VersionTabs from '@/components/aigc/VersionTabs';
 import OptimizationTimeline from '@/components/aigc/OptimizationTimeline';
+
+import RiskPieChart from '@/components/charts/RiskPieChart';
+import SegmentTimelineChart from '@/components/charts/SegmentTimelineChart';
+import { useChartData } from '@/components/charts/useChartData';
+import { chartApi, type RiskPieData, type SegmentData } from '@/lib/chartApi';
 
 type DetectionData = DetectResponse['data'];
 
@@ -39,6 +45,19 @@ export default function AIGCResultPage() {
 
   const [optimizationRecords, setOptimizationRecords] = useState<OptimizationRecordOutput[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const [activeTab, setActiveTab] = useState('overview');
+
+  const { data: riskPieData, loading: riskPieLoading } = useChartData<RiskPieData>({
+    apiFn: () => chartApi.getAIGCRiskDist(detectionId),
+    transform: (raw) => raw.data,
+    enabled: !!detectionId,
+  });
+
+  const { data: segmentData, loading: segmentLoading } = useChartData<{ paragraphs: SegmentData[] }>({
+    apiFn: () => chartApi.getAIGCSegments(detectionId),
+    transform: (raw) => raw.data,
+    enabled: !!detectionId,
+  });
 
   useEffect(() => {
     if (detectionId) {
@@ -518,6 +537,54 @@ export default function AIGCResultPage() {
               />
             </CardContent>
           </Card>
+        </section>
+
+        <section aria-labelledby="chart-title" className="mb-8">
+          <h2 id="chart-title" className="sr-only">图表分析视图</h2>
+
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="grid w-full grid-cols-3 mb-4">
+              <TabsTrigger value="overview">概览</TabsTrigger>
+              <TabsTrigger value="detail">详细分析</TabsTrigger>
+              <TabsTrigger value="charts">📊 图表视图</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="charts" className="mt-0">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <RiskPieChart
+                  data={riskPieData?.segments}
+                  score={riskPieData?.overallScore ?? detectionData?.overallScore ?? 0}
+                  onSegmentClick={(level) => {
+                    if (selectedTag !== null) setSelectedTag(null);
+                    const filtered = detectionData?.paragraphs?.filter(
+                      (p) => p.riskLevel === level
+                    ) || [];
+                    if (filtered.length > 0) {
+                      setSelectedHeatmapIndex(filtered[0].index);
+                      setSelectedParagraphs(filtered.map((p) => p.index));
+                      setActiveTab('detail');
+                    }
+                  }}
+                />
+                <div className="rounded-lg border bg-card p-4 shadow-sm">
+                  <h3 className="font-semibold text-sm text-slate-800 mb-1">
+                    段落时间线
+                  </h3>
+                  <p className="text-xs text-slate-500 mb-2">
+                    各段落风险分数分布 · ECharts可视化
+                  </p>
+                  {segmentLoading ? (
+                    <div className="flex items-center justify-center" style={{ minHeight: 250 }}>
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-2" />
+                      <span className="text-xs text-slate-400">加载中...</span>
+                    </div>
+                  ) : (
+                    <SegmentTimelineChart data={segmentData?.paragraphs} />
+                  )}
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
         </section>
 
         <div className="flex flex-wrap gap-3 justify-center py-6">
