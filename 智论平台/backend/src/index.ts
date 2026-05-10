@@ -82,6 +82,9 @@ async function main() {
   // 注册知识库与引用管理模块
   await fastify.register(require('./routes/library').default, { prefix: '/api/v1/library' })
 
+  // 注册AIGC检测模块（含图表端点）
+  await fastify.register(require('./routes/aigc').default, { prefix: '/api/v1/aigc' })
+
   fastify.get('/health', async (request, reply) => {
     return { status: 'ok', timestamp: new Date().toISOString() }
   })

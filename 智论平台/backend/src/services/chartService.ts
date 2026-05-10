@@ -214,6 +214,7 @@ export const chartService = {
       where: { id: aigcId },
       select: {
         overallScore: true,
+        createdAt: true,
         result: true,
         optimizations: {
           where: { deletedAt: null },
@@ -242,22 +243,23 @@ export const chartService = {
         score: detection.overallScore || 0,
         changeFromPrevious: null,
         timestamp: detection.createdAt?.toISOString() || new Date().toISOString(),
-        actions: null,
+        actions: undefined,
         isRebound: false,
       },
     ];
 
     detection.optimizations.forEach((opt) => {
       const prevScore =
-        points.length > 0 ? points[points.length - 1].score : opt.beforeAigcRate;
-      const change = Math.round((opt.afterAigcRate - prevScore) * 100) / 100;
+        points.length > 0 ? points[points.length - 1].score : (opt.beforeAigcRate ?? 0);
+      const afterRate = opt.afterAigcRate ?? 0;
+      const change = Math.round((afterRate - prevScore) * 100) / 100;
 
       points.push({
-        roundLabel: `R${opt.roundNumber}`,
-        roundNumber: opt.roundNumber,
-        score: opt.afterAigcRate,
+        roundLabel: `R${opt.roundNumber ?? 0}`,
+        roundNumber: opt.roundNumber ?? 0,
+        score: afterRate,
         changeFromPrevious: change,
-        timestamp: opt.createdAt.toISOString(),
+        timestamp: opt.createdAt?.toISOString() || new Date().toISOString(),
         actions: opt.targetParagraphIndices
           ? `改写P${opt.targetParagraphIndices.join(',P')}`
           : undefined,
