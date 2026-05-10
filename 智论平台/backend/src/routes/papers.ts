@@ -969,4 +969,352 @@ export default async function papersRoutes(fastify: FastifyInstance) {
       });
     }
   });
+
+  // ==================== 编辑器集成端点: 论文引用管理 ====================
+
+  // ==================== 端点: GET /api/v1/papers/:paperId/citations ====================
+
+  fastify.get('/:paperId/citations', {
+    preHandler: [fastify.authenticate],
+  }, async (
+    request: FastifyRequest<{ Params: { paperId: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: '未授权访问' },
+        });
+      }
+
+      const { paperId } = request.params;
+
+      const paper = await prisma.paper.findFirst({
+        where: { id: paperId, userId },
+      });
+
+      if (!paper) {
+        return reply.status(404).send({
+          success: false,
+          error: { code: PaperErrorCode.PAPER_NOT_FOUND, message: '论文不存在或无权访问' },
+        });
+      }
+
+      const citations = await prisma.paperCitation.findMany({
+        where: { paperId, deletedAt: null },
+        orderBy: [{ citationNumber: 'asc' }],
+        include: {
+          document: {
+            select: {
+              id: true,
+              type: true,
+              title: true,
+              authors: true,
+              year: true,
+              journal: true,
+              doi: true,
+              citationCount: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+        },
+      });
+
+      const referenceList = citations.map((c: any) => ({
+        citationNumber: c.citationNumber,
+        text: c.citationText,
+      }));
+
+      const formattedCitations = citations.map((c: any) => ({
+        ...c,
+        document: c.document ? {
+          ...c.document,
+          createdAt: c.document.createdAt.toISOString(),
+          updatedAt: c.document.updatedAt.toISOString(),
+        } : undefined,
+      }));
+
+      return reply.send({
+        success: true,
+        data: {
+          paperId,
+          citations: formattedCitations,
+          referenceList,
+        },
+        message: '获取论文引用列表成功',
+      });
+    } catch (error) {
+      fastify.log.error(error, '获取论文引用列表失败');
+      return reply.status(500).send({
+        success: false,
+        error: { code: PaperErrorCode.ANALYSIS_FAILED, message: '获取引用列表失败' },
+      });
+    }
+  });
+
+  // ==================== 端点: POST /api/v1/papers/:paperId/citations ====================
+
+  fastify.post('/:paperId/citations', {
+    preHandler: [fastify.authenticate],
+  }, async (
+    request: FastifyRequest<{ Params: { paperId: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: '未授权访问' },
+        });
+      }
+
+      const { paperId } = request.params;
+
+      const insertSchema = z.object({
+        documentIds: z.array(z.string().uuid()).min(1).max(10),
+        format: z.enum(['GBT7714', 'APA7', 'MLA9']).default('GBT7714'),
+        position: z.number().int().min(0).optional(),
+      });
+      const body = insertSchema.parse(request.body);
+
+      const paper = await prisma.paper.findFirst({
+        where: { id: paperId, userId },
+      });
+
+      if (!paper) {
+        return reply.status(404).send({
+          success: false,
+          error: { code: PaperErrorCode.PAPER_NOT_FOUND, message: '论文不存在或无权访问' },
+        });
+      }
+
+      const existingCitations = await prisma.paperCitation.findMany({
+        where: { paperId, deletedAt: null },
+        orderBy: [{ citationNumber: 'asc' }],
+      });
+
+      const maxCitationNumber = existingCitations.length > 0
+        ? Math.max(...existingCitations.map((c: any) => c.citationNumber))
+        : 0;
+
+      const inserted = [];
+      let nextCitationNumber = maxCitationNumber + 1;
+
+      for (const docId of body.documentIds) {
+        const existingCitation = existingCitations.find(
+          (c: any) => c.documentId === docId && !c.deletedAt
+        );
+
+        if (existingCitation) {
+          continue;
+        }
+
+        const doc = await prisma.document.findFirst({
+          where: { id: docId, userId, deletedAt: null },
+        });
+
+        if (!doc) {
+          continue;
+        }
+
+        const { citationEngine } = require('../services/citationEngine');
+        const citationText = citationEngine.generate(
+          {
+            type: doc.type,
+            title: doc.title,
+            authors: doc.authors,
+            year: doc.year || undefined,
+            journal: doc.journal || undefined,
+            volume: doc.volume || undefined,
+            issue: doc.issue || undefined,
+            pages: doc.pages || undefined,
+            doi: doc.doi || undefined,
+            url: doc.url || undefined,
+            publisher: doc.publisher || undefined,
+            edition: doc.edition || undefined,
+            location: doc.location || undefined,
+            university: doc.university || undefined,
+            degreeType: doc.degreeType || undefined,
+            conferenceName: doc.conferenceName || undefined,
+            conferenceLocation: doc.conferenceLocation || undefined,
+            editors: doc.editors || undefined,
+            websiteName: doc.websiteName || undefined,
+            accessDate: doc.accessDate?.toISOString(),
+            publishDate: doc.publishDate?.toISOString(),
+            patentNumber: doc.patentNumber || undefined,
+            inventors: doc.inventors || undefined,
+            filingDate: doc.filingDate?.toISOString(),
+            issuingAuthority: doc.issuingAuthority || undefined,
+            isbn: doc.isbn || undefined,
+          },
+          body.format as any
+        );
+
+        const newCitation = await prisma.paperCitation.create({
+          data: {
+            paperId,
+            documentId: docId,
+            citationNumber: nextCitationNumber,
+            citationText,
+            format: body.format as any,
+            position: body.position,
+          },
+        });
+
+        inserted.push({
+          id: newCitation.id,
+          documentId: docId,
+          citationNumber: newCitation.citationNumber,
+          citationText: newCitation.citationText,
+        });
+
+        nextCitationNumber++;
+      }
+
+      const docsToUpdate = await prisma.document.findMany({
+        where: { id: { in: body.documentIds } },
+        select: { id: true, citationCount: true },
+      });
+      for (const doc of docsToUpdate) {
+        await prisma.document.update({
+          where: { id: doc.id },
+          data: { citationCount: doc.citationCount + 1 },
+        });
+      }
+
+      const allCitations = await prisma.paperCitation.findMany({
+        where: { paperId, deletedAt: null },
+        orderBy: [{ citationNumber: 'asc' }],
+      });
+
+      const updatedReferenceList = allCitations.map((c: any) => ({
+        citationNumber: c.citationNumber,
+        text: c.citationText,
+      }));
+
+      return reply.status(201).send({
+        success: true,
+        data: {
+          inserted,
+          updatedReferenceList,
+        },
+        message: `成功插入 ${inserted.length} 个引用`,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: '参数校验失败', details: error.errors },
+        });
+      }
+
+      fastify.log.error(error, '插入引用失败');
+      return reply.status(500).send({
+        success: false,
+        error: { code: PaperErrorCode.REWRITE_FAILED, message: '插入引用失败' },
+      });
+    }
+  });
+
+  // ==================== 端点: DELETE /api/v1/papers/:paperId/citations/:id ====================
+
+  fastify.delete('/:paperId/citations/:citationId', {
+    preHandler: [fastify.authenticate],
+  }, async (
+    request: FastifyRequest<{ Params: { paperId: string; citationId: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const userId = (request as any).user?.userId;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: '未授权访问' },
+        });
+      }
+
+      const { paperId, citationId } = request.params;
+
+      const paper = await prisma.paper.findFirst({
+        where: { id: paperId, userId },
+      });
+
+      if (!paper) {
+        return reply.status(404).send({
+          success: false,
+          error: { code: PaperErrorCode.PAPER_NOT_FOUND, message: '论文不存在或无权访问' },
+        });
+      }
+
+      const citation = await prisma.paperCitation.findFirst({
+        where: { id: citationId, paperId, deletedAt: null },
+      });
+
+      if (!citation) {
+        return reply.status(404).send({
+          success: false,
+          error: { code: 'NOT_FOUND', message: '引用记录不存在' },
+        });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.paperCitation.update({
+          where: { id: citationId },
+          data: { deletedAt: new Date() },
+        });
+
+        const remainingCitations = await tx.paperCitation.findMany({
+          where: { paperId, deletedAt: null, citationNumber: { gt: citation.citationNumber } },
+          orderBy: [{ citationNumber: 'asc' }],
+        });
+
+        for (let i = 0; i < remainingCitations.length; i++) {
+          await tx.paperCitation.update({
+            where: { id: remainingCitations[i].id },
+            data: { citationNumber: citation.citationNumber + i },
+          });
+        }
+      });
+
+      const doc = await prisma.document.findUnique({
+        where: { id: citation.documentId },
+        select: { citationCount: true },
+      });
+      if (doc) {
+        await prisma.document.update({
+          where: { id: citation.documentId },
+          data: { citationCount: Math.max(0, doc.citationCount - 1) },
+        });
+      }
+
+      const allCitations = await prisma.paperCitation.findMany({
+        where: { paperId, deletedAt: null },
+        orderBy: [{ citationNumber: 'asc' }],
+      });
+
+      const updatedReferenceList = allCitations.map((c: any) => ({
+        citationNumber: c.citationNumber,
+        text: c.citationText,
+      }));
+
+      return reply.send({
+        success: true,
+        data: {
+          removed: { id: citationId, documentId: citation.documentId },
+          updatedReferenceList,
+        },
+        message: '引用已移除并重新编号',
+      });
+    } catch (error) {
+      fastify.log.error(error, '移除引用失败');
+      return reply.status(500).send({
+        success: false,
+        error: { code: PaperErrorCode.REWRITE_FAILED, message: '移除引用失败' },
+      });
+    }
+  });
 }

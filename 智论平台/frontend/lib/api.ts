@@ -293,6 +293,96 @@ export interface HistoryDetailResponse {
   totalCreditsConsumed: number;
 }
 
+// ========== Library & Citation Management API Types ==========
+
+export type DocumentType = 'JOURNAL_ARTICLE' | 'THESIS' | 'BOOK' | 'CONFERENCE_PAPER' | 'WEBPAGE' | 'PATENT';
+export type DegreeType = 'BACHELOR' | 'MASTER' | 'DOCTOR';
+export type CitationFormat = 'GBT7714' | 'APA7' | 'MLA9';
+
+export interface DocumentListItem {
+  id: string;
+  type: DocumentType;
+  title: string;
+  authors: string;
+  year: number | null;
+  journal?: string | null;
+  university?: string | null;
+  publisher?: string | null;
+  doi: string | null;
+  citationCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentDetail {
+  id: string;
+  type: DocumentType;
+  title: string;
+  authors: string;
+  year: number | null;
+  doi: string | null;
+  url: string | null;
+  abstract: string | null;
+  keywords: string[];
+  notes: string | null;
+  citationCount: number;
+  createdAt: string;
+  updatedAt: string;
+  journalData?: { journal: string | null; volume: string | null; issue: string | null; pages: string | null } | null;
+  thesisData?: { university: string | null; degreeType: DegreeType | null } | null;
+  bookData?: { publisher: string | null; edition: string | null; isbn: string | null; location: string | null } | null;
+  conferenceData?: { conferenceName: string | null; conferenceLocation: string | null; editors: string | null; pages: string | null } | null;
+  webpageData?: { websiteName: string | null; url: string | null; accessDate: string | null; publishDate: string | null } | null;
+  patentData?: { patentNumber: string | null; inventors: string | null; filingDate: string | null; issuingAuthority: string | null } | null;
+}
+
+export interface DOILookupResult {
+  found: boolean;
+  metadata: {
+    type: DocumentType;
+    title: string;
+    authors: string[];
+    journal?: string;
+    year?: number;
+    volume?: string;
+    issue?: string;
+    pages?: string;
+    doi: string;
+    university?: string;
+    degreeType?: DegreeType;
+    publisher?: string;
+    isbn?: string;
+    location?: string;
+    conferenceName?: string;
+    conferenceLocation?: string;
+    websiteName?: string;
+    url?: string;
+    patentNumber?: string;
+    inventors?: string;
+    filingDate?: string;
+    issuingAuthority?: string;
+  } | null;
+  matchType: 'exact' | 'trimmed' | 'prefix' | null;
+  lookupTimeMs: number;
+}
+
+export interface CitationResult {
+  documentId: string;
+  format: CitationFormat;
+  citationText: string;
+  title: string;
+  authors: string;
+}
+
+export interface LibraryListParams {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  sortBy?: 'createdAt' | 'updatedAt' | 'title' | 'authors' | 'year';
+  sortOrder?: 'asc' | 'desc';
+  type?: DocumentType | 'ALL';
+}
+
 // ========== AIGC Detection & Optimization API ==========
 
 export const aigcApi = {
@@ -455,6 +545,145 @@ export const aigcApi = {
     id: string
   ): Promise<{ success: boolean; message: string }> => {
     const response = await apiClient.delete(`/aigc/history/${id}`);
+    return response.data;
+  },
+};
+
+// ========== Library & Citation Management API ==========
+
+export const libraryApi = {
+  getList: async (params?: LibraryListParams): Promise<{
+    success: boolean;
+    data: {
+      documents: DocumentListItem[];
+      total: number;
+      page: number;
+      pageSize: number;
+      totalPages: number;
+      statistics: {
+        totalCount: number;
+        thisMonthCount: number;
+        typeDistribution: Record<DocumentType, number>;
+        totalCitations: number;
+      };
+    };
+  }> => {
+    const queryParams = new URLSearchParams();
+    
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.sortBy) queryParams.append('sortBy', params.sortBy);
+    if (params?.sortOrder) queryParams.append('sortOrder', params.sortOrder);
+    if (params?.type && params.type !== 'ALL') queryParams.append('type', params.type);
+
+    const queryString = queryParams.toString();
+    const url = `/library/documents${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await apiClient.get(url);
+    return response.data;
+  },
+
+  getById: async (id: string): Promise<{
+    success: boolean;
+    data: DocumentDetail;
+  }> => {
+    const response = await apiClient.get(`/library/documents/${id}`);
+    return response.data;
+  },
+
+  create: async (data: Partial<DocumentDetail>): Promise<{
+    success: boolean;
+    data: DocumentDetail;
+  }> => {
+    const response = await apiClient.post('/library/documents', data);
+    return response.data;
+  },
+
+  update: async (id: string, data: Partial<DocumentDetail>): Promise<{
+    success: boolean;
+    data: DocumentDetail;
+  }> => {
+    const response = await apiClient.put(`/library/documents/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: string): Promise<{ success: boolean; message: string }> => {
+    const response = await apiClient.delete(`/library/documents/${id}`);
+    return response.data;
+  },
+
+  batchDelete: async (ids: string[]): Promise<{ success: boolean; deletedCount: number; message: string }> => {
+    const response = await apiClient.post('/library/documents/batch-delete', { ids });
+    return response.data;
+  },
+
+  lookupDOI: async (doi: string): Promise<{
+    success: boolean;
+    data: DOILookupResult;
+  }> => {
+    const response = await apiClient.post('/library/doi/lookup', { doi });
+    return response.data;
+  },
+
+  generateCitations: async (
+    ids: string[],
+    format: CitationFormat = 'GBT7714'
+  ): Promise<{
+    success: boolean;
+    data: CitationResult[];
+  }> => {
+    const response = await apiClient.post('/library/citations/generate', { documentIds: ids, format });
+    return response.data;
+  },
+
+  exportCitations: async (
+    ids: string[],
+    format: CitationFormat,
+    options?: { includeHeader?: boolean; lineNumbers?: boolean }
+  ): Promise<{ success: boolean; data: { content: string; filename: string; mimeType: string } }> => {
+    const response = await apiClient.post('/library/export', { documentIds: ids, format, ...options });
+    return response.data;
+  },
+
+  getPaperCitations: async (paperId: string): Promise<{
+    success: boolean;
+    data: Array<{
+      id: string;
+      documentId: string;
+      citationNumber: number;
+      citationText: string;
+      format: CitationFormat;
+      position: number | null;
+      document: DocumentListItem;
+    }>;
+  }> => {
+    const response = await apiClient.get(`/papers/${paperId}/citations`);
+    return response.data;
+  },
+
+  insertCitation: async (
+    paperId: string,
+    ids: string[],
+    format?: CitationFormat,
+    position?: number
+  ): Promise<{
+    success: boolean;
+    data: {
+      citations: Array<{ id: string; citationNumber: number; citationText: string }>;
+      referenceList: string[];
+    };
+  }> => {
+    const response = await apiClient.post(`/papers/${paperId}/citations`, {
+      documentIds: ids,
+      format: format || 'GBT7714',
+      position,
+    });
+    return response.data;
+  },
+
+  removeCitation: async (paperId: string, citationId: string): Promise<{ success: boolean; message: string }> => {
+    const response = await apiClient.delete(`/papers/${paperId}/citations/${citationId}`);
     return response.data;
   },
 };

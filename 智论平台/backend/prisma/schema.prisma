@@ -59,7 +59,8 @@ model Paper {
   updatedAt     DateTime    @updatedAt
   
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  citations     PaperCitation[]
+
   @@map("papers")
 }
 
@@ -72,27 +73,48 @@ enum PaperStatus {
 
 // 文献表
 model Document {
-  id            String   @id @default(uuid())
-  userId        String
-  title         String
-  authors       String
-  journal       String?
-  year          Int?
-  volume        String?
-  issue         String?
-  pages         String?
-  doi           String?
-  url           String?
-  abstract      String?  @db.Text
-  keywords      String[]
-  content       String?  @db.Text
-  filePath      String?
-  embedding     Float[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id                String         @id @default(uuid())
+  userId            String
+  title             String
+  authors           String
+  journal           String?
+  year              Int?
+  volume            String?
+  issue             String?
+  pages             String?
+  doi               String?        @unique
+  url               String?
+  abstract          String?        @db.Text
+  keywords          String[]
+  content           String?        @db.Text
+  filePath          String?
+  embedding         Float[]
+  type              DocumentType   @default(JOURNAL_ARTICLE)
+  university        String?
+  degreeType        DegreeType?
+  publisher         String?
+  edition           String?
+  isbn              String?
+  location          String?
+  conferenceName    String?
+  conferenceLocation String?
+  editors           String?
+  websiteName       String?
+  accessDate        DateTime?
+  publishDate       DateTime?
+  patentNumber      String?
+  inventors         String?
+  filingDate        DateTime?
+  issuingAuthority  String?
+  notes             String?         @db.Text
+  citationCount     Int             @default(0)
+  deletedAt         DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paperCitations    PaperCitation[]
+
   @@map("documents")
 }
 
@@ -220,4 +242,50 @@ enum RewriteVersionTypeEnum {
   Conservative
   Balanced
   Aggressive
+}
+
+// ========== 知识库与引用管理 ==========
+
+enum DocumentType {
+  JOURNAL_ARTICLE
+  THESIS
+  BOOK
+  CONFERENCE_PAPER
+  WEBPAGE
+  PATENT
+}
+
+enum DegreeType {
+  BACHELOR
+  MASTER
+  DOCTOR
+}
+
+enum CitationFormat {
+  GBT7714
+  APA7
+  MLA9
+}
+
+// 论文-文献引用关联表
+model PaperCitation {
+  id             String         @id @default(uuid())
+  paperId        String
+  documentId     String
+  citationNumber Int
+  citationText   String?        @db.Text
+  format         CitationFormat @default(GBT7714)
+  position       Int?
+  deletedAt      DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  paper          Paper          @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  document       Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([paperId, citationNumber])
+  @@index([documentId])
+  @@index([paperId, documentId])
+  @@unique([paperId, documentId, position])
+  @@map("paper_citations")
 }
