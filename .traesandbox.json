@@ -1,6 +1,16 @@
 {
     "network": {
         "default": "allow",
-        "allow": ["140.143.208.22", "*.tencent.com"]
+        "allow": [
+            "140.143.208.22",
+            "github.com",
+            "*.github.com",
+            "gitee.com",
+            "*.gitee.com",
+            "*.nodesource.com",
+            "*.postgresql.org",
+            "deb.nodesource.com"
+        ],
+        "deny": []
     }
 }
