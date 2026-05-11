@@ -1,0 +1,6 @@
+{
+    "network": {
+        "default": "allow",
+        "allow": ["140.143.208.22", "*.tencent.com"]
+    }
+}
